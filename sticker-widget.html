@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>表情包</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: transparent; }
+      body { width: 100%; min-height: 1px; overflow: hidden; }
+      #sticker-root { display: block; width: 160px; max-width: 100%; }
+      #sticker-image {
+        display: block;
+        width: 160px;
+        max-width: 100%;
+        height: auto;
+        border-radius: 12px;
+      }
+      #sticker-fallback {
+        display: none;
+        color: CanvasText;
+        font: 14px/1.4 system-ui, -apple-system, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sticker-root" aria-live="polite">
+      <img id="sticker-image" alt="" hidden />
+      <span id="sticker-fallback" role="status"></span>
+    </div>
+
+    <script type="module">
+      const image = document.querySelector("#sticker-image");
+      const fallback = document.querySelector("#sticker-fallback");
+      let rpcId = 0;
+      const pendingRequests = new Map();
+
+      function renderSticker(sticker) {
+        if (!sticker?.imageUrl) return;
+        image.hidden = false;
+        image.src = sticker.imageUrl;
+        image.alt = sticker.description || "表情包";
+        fallback.style.display = "none";
+        fallback.textContent = "";
+
+        window.openai?.setWidgetState?.({
+          sticker: {
+            id: sticker.id,
+            description: sticker.description,
+            labels: sticker.labels,
+            imageUrl: sticker.imageUrl,
+          },
+        });
+      }
+
+      image.addEventListener("error", () => {
+        image.hidden = true;
+        fallback.textContent = image.alt || "表情包加载失败";
+        fallback.style.display = "block";
+      });
+
+      function updateFromResponse(response) {
+        const sticker = response?.structuredContent?.sticker;
+        if (sticker) renderSticker(sticker);
+      }
+
+      function rpcNotify(method, params) {
+        window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+      }
+
+      function rpcRequest(method, params) {
+        return new Promise((resolve, reject) => {
+          const id = ++rpcId;
+          pendingRequests.set(id, { resolve, reject });
+          window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+        });
+      }
+
+      window.addEventListener(
+        "message",
+        (event) => {
+          if (event.source !== window.parent) return;
+          const message = event.data;
+          if (!message || message.jsonrpc !== "2.0") return;
+
+          if (typeof message.id === "number") {
+            const pending = pendingRequests.get(message.id);
+            if (!pending) return;
+            pendingRequests.delete(message.id);
+            if (message.error) pending.reject(message.error);
+            else pending.resolve(message.result);
+            return;
+          }
+
+          if (message.method === "ui/notifications/tool-result") {
+            updateFromResponse(message.params);
+          }
+        },
+        { passive: true }
+      );
+
+      async function initializeBridge() {
+        await rpcRequest("ui/initialize", {
+          appInfo: { name: "paopao-sticker-widget", version: "0.1.0" },
+          appCapabilities: {},
+          protocolVersion: "2026-01-26",
+        });
+        rpcNotify("ui/notifications/initialized", {});
+      }
+
+      const restored = window.openai?.widgetState?.sticker;
+      if (restored) renderSticker(restored);
+
+      const initial = window.openai?.toolOutput?.sticker;
+      if (initial) renderSticker(initial);
+
+      initializeBridge().catch((error) => {
+        console.error("Sticker widget initialization failed", error);
+      });
+    </script>
+  </body>
+</html>
