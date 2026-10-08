@@ -1,11 +1,7 @@
-import { readFileSync } from "node:fs";
+import source from "./stickers.json" with { type: "json" };
 
 export const CDN_BASE =
   "https://cdn.jsdelivr.net/gh/zhizhi-yosh/stickers@main/";
-
-const source = JSON.parse(
-  readFileSync(new URL("./stickers.json", import.meta.url), "utf8")
-);
 
 export const stickers = Object.freeze(
   source.map((sticker) =>
